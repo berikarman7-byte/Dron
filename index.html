@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Квадрокоптер: 3D-макет</title>
+<style>
+:root{--bg:#0d1016;--p:#161b24cc;--l:#ffffff1f;--t:#eef1f5;--m:#8b95a5;--a:#4cc2ff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--t);font:14px system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+.pn{position:fixed;background:var(--p);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--l);border-radius:16px;padding:14px}
+#ui{left:12px;top:12px;width:250px;max-height:calc(100% - 24px);overflow:auto}
+#card{right:12px;top:12px;width:260px}#card[hidden]{display:none}
+#card h3{margin:0 0 6px}#card p{margin:4px 0;color:var(--m)}#card b{color:var(--t)}
+h1{font-size:15px;margin:0;cursor:pointer}.c .bd{display:none}
+label{display:block;margin:12px 0 6px;color:var(--m);font-size:12px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}
+button{font:inherit;border:0;border-radius:10px;padding:9px;background:#ffffff14;color:var(--t);cursor:pointer}
+button:hover{background:#ffffff26}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+.seg b{font-weight:500;padding:6px 10px;border-radius:8px;background:#ffffff12;cursor:pointer}
+.seg b.on{background:var(--a);color:#04121c}
+input[type=range]{width:100%;accent-color:var(--a)}
+.ck{display:flex;gap:8px;align-items:center}
+summary{cursor:pointer;margin-top:12px;color:var(--m)}
+table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+td{padding:4px 0;border-bottom:1px solid var(--l)}td:last-child{text-align:right}
+.h{color:var(--m);font-size:12px;margin:12px 0 0}
+#ld{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;z-index:9;transition:opacity .5s}
+#ld div{width:220px;text-align:center}#ld i{display:block;height:4px;background:#ffffff1f;border-radius:4px;margin-top:12px;overflow:hidden}
+#pb{display:block;height:100%;width:8%;background:var(--a);transition:width .2s}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 16px);transform:translateX(-50%);background:var(--p);border:1px solid var(--l);padding:10px 16px;border-radius:12px;opacity:0;transition:opacity .3s;pointer-events:none;max-width:90%;text-align:center}
+@media(max-width:640px){#ui{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-height:46%}#card{left:8px;right:8px;top:8px;width:auto}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+</head>
+<body>
+<div id="ld"><div><b>Загрузка модели…</b><i><u id="pb"></u></i></div></div>
+<canvas id="c"></canvas>
+<div id="ui" class="pn"><h1 id="hd">Phantom 2 · 3D-макет ▾</h1><div class="bd">
+<div class="g2"><button id="bx">Взрыв-схема</button><button id="bf">Полёт</button><button id="bs">Скриншот</button><button id="ba">AR</button></div>
+<label>Режим</label><div class="seg" data-k="mode"><b data-v="n" class="on">Обычный</b><b data-v="w">Каркас</b><b data-v="x">Рентген</b></div>
+<label>Среда</label><div class="seg" data-k="env"><b data-v="studio" class="on">Студия</b><b data-v="day">День</b><b data-v="sunset">Закат</b><b data-v="night">Ночь</b></div>
+<label>Пропеллеры: <span id="sv">25%</span></label><input id="sp" type="range" min="0" max="100" value="25">
+<label class="ck"><input id="pp" type="checkbox"> Пост-обработка (SSAO, bloom, DoF)</label>
+<details><summary>Характеристики</summary><table id="tb"></table></details>
+<p class="h">Перетащи .glb на страницу, чтобы загрузить свою модель. Нажми на деталь, чтобы увидеть информацию.</p>
+</div></div>
+<div id="card" class="pn" hidden></div>
+<div id="toast"></div>
+<model-viewer id="mv" ar ar-modes="webxr scene-viewer quick-look" style="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none"></model-viewer>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {SAOPass} from 'three/addons/postprocessing/SAOPass.js';
+import {BokehPass} from 'three/addons/postprocessing/BokehPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+
+// ===== НАСТРОЙКИ: путь к твоей модели .glb (если файла нет, показывается встроенный макет) =====
+const MODEL_URL = 'drone.glb';
+const SIZE = 5; // размер модели в сцене (наибольшая сторона)
+
+const $ = s => document.querySelector(s), coarse = matchMedia('(pointer:coarse)').matches;
+const INFO = {
+  frame:['Рама и корпус','Ударопрочный ABS-пластик, глянец','Несёт электронику, GPS и аккумулятор; к нему крепятся лучи и защита пропеллеров.'],
+  motors:['Моторы','Алюминиевый корпус, бесколлекторный мотор','Вращают пропеллеры; разная скорость моторов управляет наклоном и подъёмом.'],
+  props:['Пропеллеры','Армированный пластик','Создают подъёмную силу; пары вращаются в разные стороны, компенсируя крутящий момент.'],
+  gimbal:['Подвес (гимбал)','Пластик и алюминий, бесколлекторные моторы','Стабилизирует камеру, гася наклоны и вибрации дрона.'],
+  camera:['Камера GoPro','Пластик, стеклянная линза','Снимает видео и фото с воздуха.'],
+  gear:['Шасси','Лёгкий пластик, резиновые накладки','Держит дрон при посадке и защищает подвес.']};
+const SPECS = [['Диагональ','≈350 мм'],['Масса','≈1000 г'],['Аккумулятор','LiPo 3S, 5200 мАч'],['Время полёта','до 25 мин'],['Макс. скорость','до 15 м/с'],['Подвес','3 оси, для GoPro'],['Камера','GoPro HERO3']]; // значения ориентировочные
+$('#tb').innerHTML = SPECS.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+const OFF = {frame:[0,1.2,0],motors:[0,1.8,0],props:[0,3,0],gimbal:[0,.6,.5],camera:[0,0,1.6],gear:[0,-.2,0]};
+const RE = [['props',/prop|blade|rotor|винт|пропел/i],['gimbal',/gimbal|zenmuse|подвес/i],['motors',/motor|мотор/i],['camera',/cam|gopro|lens|камер/i],['gear',/leg|skid|gear|landing|шасси/i]];
+
+// ===== Рендерер, сцена, камера =====
+const r = new THREE.WebGLRenderer({canvas:$('#c'), antialias:true});
+r.setPixelRatio(Math.min(devicePixelRatio,2));
+r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+r.toneMapping = THREE.ACESFilmicToneMapping;
+const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(40,1,.1,80);
+cam.position.set(7,4,9);
+const ctl = new OrbitControls(cam, r.domElement);
+Object.assign(ctl,{enableDamping:true,dampingFactor:.06,minDistance:3,maxDistance:24,maxPolarAngle:Math.PI/2-.02});
+ctl.target.set(0,.9,0);
+const sun = new THREE.DirectionalLight(0xffffff,2); sun.castShadow = true; sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-9,right:9,top:9,bottom:-9,near:1,far:60}); sun.shadow.bias = -.0004; scene.add(sun);
+const gnd = new THREE.Mesh(new THREE.PlaneGeometry(60,60), new THREE.ShadowMaterial({opacity:.5}));
+gnd.rotation.x = -Math.PI/2; gnd.receiveShadow = true; scene.add(gnd);
+
+// ===== Среды (отражения IBL строятся процедурно, без внешних HDR-файлов) =====
+const pm = new THREE.PMREMGenerator(r), envs = {};
+const ENV = {
+  studio:{bg:0x11151c,L:[0xffffff,2.2,[4,9,6]]},
+  day:{a:0x5fa8e8,b:0xe3edf5,s:0xfff1d6,k:40,p:[30,35,20],L:[0xfff4e0,3,[6,10,5]]},
+  sunset:{a:0x2b3a6b,b:0xff9a5c,s:0xffb070,k:60,p:[40,6,-20],L:[0xffa760,2.5,[8,3,-5]]},
+  night:{a:0x05070d,b:0x14213a,s:0xaac4ff,k:8,p:[-20,25,15],L:[0x9fb8ff,.8,[-6,9,5]]}};
+function setEnv(k){
+  const c = ENV[k];
+  if(!envs[k]){
+    if(k==='studio') envs[k] = pm.fromScene(new RoomEnvironment(),.04).texture;
+    else{
+      const s = new THREE.Scene();
+      s.add(new THREE.Mesh(new THREE.SphereGeometry(50,32,16), new THREE.ShaderMaterial({side:THREE.BackSide,
+        uniforms:{a:{value:new THREE.Color(c.a)},b:{value:new THREE.Color(c.b)}},
+        vertexShader:'varying vec3 p;void main(){p=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+        fragmentShader:'varying vec3 p;uniform vec3 a,b;void main(){gl_FragColor=vec4(mix(b,a,smoothstep(-.2,.8,p.y)),1.);}'})));
+      const o = new THREE.Mesh(new THREE.SphereGeometry(5,16,8), new THREE.MeshBasicMaterial({color:new THREE.Color(c.s).multiplyScalar(c.k)}));
+      o.position.set(...c.p).normalize().multiplyScalar(40); s.add(o);
+      envs[k] = pm.fromScene(s,.02).texture;
+    }
+  }
+  scene.environment = envs[k]; scene.background = k==='studio' ? new THREE.Color(c.bg) : envs[k]; scene.backgroundBlurriness = .35;
+  sun.color.set(c.L[0]); sun.intensity = c.L[1]; sun.position.set(...c.L[2]);
+}
+
+// ===== Встроенный макет (если нет .glb); у каждой детали userData.cat = категория =====
+function build(){
+  const g = new THREE.Group(), ph = o => new THREE.MeshPhysicalMaterial(o);
+  const W = ph({color:0xf4f4f1,roughness:.28,clearcoat:1,clearcoatRoughness:.08}), R = ph({color:0xd8281e,roughness:.35,clearcoat:.6}),
+    K = ph({color:0x15161a,roughness:.9}), M = ph({color:0xbfc4cc,metalness:1,roughness:.28}),
+    G = ph({color:0x071522,roughness:.02,metalness:.3,clearcoat:1}), B = ph({color:0xf4f4f1,roughness:.5,transparent:true}),
+    BR = ph({color:0xd8281e,roughness:.5,transparent:true}), D = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,depthWrite:false,side:2});
+  D.userData.disc = true;
+  const a = (geo,m,c,x,y,z,p=g) => {const o = new THREE.Mesh(geo,m); o.position.set(x,y,z); o.userData.cat = c; p.add(o); return o};
+  a(new THREE.SphereGeometry(1,40,20),W,'frame',0,.1,0).scale.set(1.3,.5,1.3);
+  a(new THREE.BoxGeometry(1.9,.2,1.9),W,'frame',0,-.15,0);
+  a(new THREE.CylinderGeometry(.25,.3,.12,24),K,'frame',0,.58,0);
+  a(new THREE.BoxGeometry(.5,.05,.12),R,'frame',0,.45,.92);
+  for(let i=0;i<4;i++){
+    const t = Math.PI/4+i*Math.PI/2, c = Math.cos(t), s = Math.sin(t);
+    a(new THREE.BoxGeometry(2.4,.12,.26),W,'frame',c*1.3,.05,s*1.3).rotation.y = -t;
+    a(new THREE.CylinderGeometry(.24,.26,.32,24),M,'motors',c*2.4,.12,s*2.4);
+    const p = new THREE.Group(); p.position.set(c*2.4,.32,s*2.4); p.userData.cat = 'props'; p.userData.dir = i%2?1:-1; g.add(p);
+    a(new THREE.BoxGeometry(1.9,.025,.17),B,'props',0,0,0,p);
+    [.75,-.75].forEach(x => a(new THREE.BoxGeometry(.4,.03,.175),BR,'props',x,.002,0,p));
+    a(new THREE.CylinderGeometry(.08,.08,.08,12),K,'props',0,.03,0,p);
+    a(new THREE.CircleGeometry(.95,32),D,'props',0,.01,0,p).rotation.x = -Math.PI/2;
+    a(new THREE.TorusGeometry(1.25,.04,10,64),W,'frame',c*2.4,.3,s*2.4).rotation.x = Math.PI/2;
+    a(new THREE.BoxGeometry(1.25,.05,.05),W,'frame',c*3.02,.3,s*3.02).rotation.y = -t;
+  }
+  [-1,1].forEach(x => {
+    [-.75,.75].forEach(z => a(new THREE.CylinderGeometry(.055,.055,1.2,12),W,'gear',x*.95,-.75,z));
+    a(new THREE.CylinderGeometry(.07,.07,2.2,16),K,'gear',x*.95,-1.35,0).rotation.x = Math.PI/2;
+  });
+  a(new THREE.BoxGeometry(.55,.3,.55),K,'gimbal',0,-.4,.25);
+  a(new THREE.TorusGeometry(.3,.03,8,24),M,'gimbal',0,-.72,.55).rotation.y = Math.PI/2;
+  a(new THREE.BoxGeometry(.5,.42,.36),K,'camera',0,-.72,.55);
+  a(new THREE.CylinderGeometry(.15,.15,.14,24),M,'camera',0,-.72,.8).rotation.x = Math.PI/2;
+  a(new THREE.CylinderGeometry(.1,.1,.03,24),G,'camera',0,-.72,.88).rotation.x = Math.PI/2;
+  return g;
+}
+
+// ===== Модель: нормализация, категории, части для взрыв-схемы =====
+const drone = new THREE.Group(), rig = new THREE.Group(); drone.add(rig); scene.add(drone);
+let holder, parts = [], propNodes = [], meshes = [], mats = new Set(), propMats = new Set(), mode = 'n', sel = null;
+const catOf = (n,root) => {for(let p=n; p&&p!==root; p=p.parent) for(const [c,re] of RE) if(re.test(p.name)) return c; return 'frame'};
+function setModel(o, proc){
+  if(holder) rig.remove(holder);
+  fly = ft = 0; et = ex = 0; drone.position.set(0,0,0); rig.rotation.set(0,0,0);
+  holder = new THREE.Group(); holder.add(o); rig.add(holder); holder.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(holder), sz = bb.getSize(new THREE.Vector3()), ct = bb.getCenter(new THREE.Vector3()), k = SIZE/Math.max(sz.x,sz.y,sz.z);
+  holder.scale.setScalar(k); holder.position.set(-ct.x*k,-bb.min.y*k,-ct.z*k); holder.updateMatrixWorld(true);
+  meshes = []; mats = new Set(); propNodes = []; propMats = new Set();
+  o.traverse(n => { if(!n.isMesh) return;
+    n.userData.cat = n.userData.cat || catOf(n,o); n.castShadow = n.receiveShadow = true; meshes.push(n);
+    [].concat(n.material).forEach(m => {mats.add(m); if(m.userData.t0===undefined){m.userData.t0 = m.transparent; m.userData.o0 = m.opacity;} m.envMapIntensity = 1;});
+  });
+  if(proc) propNodes = o.children.filter(c => c.userData.dir);
+  else { const walk = n => {if(RE[0][1].test(n.name)){n.userData.dir = propNodes.length%2?1:-1; propNodes.push(n); return} n.children.forEach(walk)}; walk(o); }
+  propNodes.forEach(n => n.traverse(m => m.isMesh && [].concat(m.material).forEach(x => {x.transparent = true; x.userData.prop = true; propMats.add(x)})));
+  // смещения для взрыв-схемы (переводим мировой вектор в локальные координаты родителя)
+  parts = (proc ? [...o.children] : meshes).map(n => {
+    const w = n.getWorldPosition(new THREE.Vector3()), v = new THREE.Vector3(...OFF[n.userData.cat]);
+    if(n.userData.cat==='motors'||n.userData.cat==='props'){const d = new THREE.Vector3(w.x,0,w.z); if(d.lengthSq()>1e-4) v.addScaledVector(d.normalize(),1.2)}
+    const p0 = n.parent.worldToLocal(w.clone()), p1 = n.parent.worldToLocal(w.clone().add(v));
+    return {n, b:n.position.clone(), o:p1.sub(p0)};
+  });
+  setMode(mode); show(null);
+}
+function setMode(v){
+  mode = v;
+  mats.forEach(m => { m.wireframe = v==='w'; if(m.userData.prop) return;
+    m.transparent = v==='x' || m.userData.t0; m.opacity = v==='x' ? .28 : m.userData.o0; m.depthWrite = v!=='x'; m.needsUpdate = true; });
+}
+function show(c){
+  sel = c; const card = $('#card');
+  meshes.forEach(m => [].concat(m.material).forEach(x => { if(!x.emissive) return;
+    if(x.userData.e===undefined) x.userData.e = x.emissive.getHex();
+    x.emissive.setHex(m.userData.cat===c ? 0x1560ff : x.userData.e); }));
+  if(!c){card.hidden = true; return}
+  const i = INFO[c]; card.innerHTML = `<h3>${i[0]}</h3><p><b>Материал:</b> ${i[1]}</p><p><b>Назначение:</b> ${i[2]}</p>`; card.hidden = false;
+}
+
+// ===== Загрузка (+ прогресс, запасной вариант, drag and drop) =====
+const gl = new GLTFLoader(), toast = t => {const e = $('#toast'); e.textContent = t; e.style.opacity = 1; setTimeout(() => e.style.opacity = 0, 3500)};
+const done = () => {$('#ld').style.opacity = 0; setTimeout(() => $('#ld').remove(), 600)};
+function load(url, drop){
+  gl.load(url, g => {setModel(g.scene,false); done()},
+    x => {if(x.total) $('#pb').style.width = x.loaded/x.total*100+'%'},
+    () => {if(drop) return toast('Не удалось открыть файл (нужен .glb)'); setModel(build(),true); done(); toast(MODEL_URL+' не найден: показан встроенный макет')});
+}
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {e.preventDefault(); const f = e.dataTransfer.files[0]; if(f) load(URL.createObjectURL(f),true)});
+
+// ===== Выбор детали кликом =====
+const rc = new THREE.Raycaster(), pt = new THREE.Vector2(); let dn;
+r.domElement.addEventListener('pointerdown', e => dn = [e.clientX,e.clientY]);
+r.domElement.addEventListener('pointerup', e => {
+  if(!dn || Math.hypot(e.clientX-dn[0],e.clientY-dn[1])>5) return;
+  pt.set(e.clientX/innerWidth*2-1, -e.clientY/innerHeight*2+1); rc.setFromCamera(pt,cam);
+  const h = rc.intersectObjects(meshes,false).find(x => !x.object.material.userData.disc || x.object.material.opacity>.02);
+  show(h ? h.object.userData.cat : null);
+});
+
+// ===== Интерфейс =====
+document.querySelectorAll('.seg').forEach(s => s.onclick = e => {
+  const v = e.target.dataset.v; if(!v) return;
+  [...s.children].forEach(c => c.classList.toggle('on', c===e.target)); (s.dataset.k==='mode' ? setMode : setEnv)(v);
+});
+$('#hd').onclick = () => $('#ui').classList.toggle('c');
+const upd = () => $('#sv').textContent = $('#sp').value+'%'; $('#sp').oninput = upd;
+let ex = 0, et = 0, fly = 0, ft = 0, ang = 0;
+$('#bx').onclick = () => {et = et ? 0 : 1; $('#bx').textContent = et ? 'Собрать' : 'Взрыв-схема'};
+$('#bf').onclick = () => {ft = ft ? 0 : 1; sound(); $('#sp').value = ft ? 85 : 25; upd(); $('#bf').textContent = ft ? 'Посадка' : 'Полёт'};
+$('#bs').onclick = () => {render(); r.domElement.toBlob(b => {const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'drone.png'; a.click()})};
+$('#ba').onclick = async () => { // AR: экспорт модели в GLB и запуск model-viewer
+  const mv = $('#mv'), g = await new Promise((ok,no) => new GLTFExporter().parse(holder,ok,no,{binary:true}));
+  mv.src = URL.createObjectURL(new Blob([g])); await new Promise(ok => mv.addEventListener('load',ok,{once:true}));
+  mv.canActivateAR ? mv.activateAR() : toast('AR недоступен на этом устройстве (нужен телефон с ARCore/ARKit)');
+};
+$('#pp').checked = !coarse;
+
+// ===== Звук моторов (WebAudio) =====
+let au, o1, o2, gn;
+function sound(){
+  if(au) return au.resume();
+  au = new AudioContext(); gn = au.createGain(); gn.gain.value = 0;
+  const f = au.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+  o1 = au.createOscillator(); o2 = au.createOscillator(); o1.type = 'sawtooth'; o2.type = 'square'; o2.detune.value = 14;
+  [o1,o2].forEach(o => {o.connect(f); o.start()}); f.connect(gn).connect(au.destination);
+}
+
+// ===== Пост-обработка: SSAO, глубина резкости, bloom, ACES =====
+const comp = new EffectComposer(r), sao = new SAOPass(scene,cam),
+  bok = new BokehPass(scene,cam,{focus:10,aperture:.0006,maxblur:.006}), bl = new UnrealBloomPass(new THREE.Vector2(512,512),.25,.6,.9);
+[new RenderPass(scene,cam),sao,bok,bl,new OutputPass()].forEach(p => comp.addPass(p));
+Object.assign(sao.params,{saoIntensity:.05,saoScale:3,saoKernelRadius:30,saoBias:.6});
+const render = () => $('#pp').checked ? comp.render() : r.render(scene,cam);
+function rs(){const w = innerWidth, h = innerHeight; r.setSize(w,h); comp.setSize(w,h); cam.aspect = w/h; cam.updateProjectionMatrix()}
+addEventListener('resize', rs); rs();
+
+// ===== Главный цикл =====
+const clock = new THREE.Clock(), tgt = new THREE.Vector3();
+r.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(),.05), e = Math.min(1,dt*4);
+  ex += (et-ex)*e; parts.forEach(p => p.n.position.copy(p.b).addScaledVector(p.o,ex));
+  // полёт: подъём, круг, наклон по направлению движения
+  fly += (ft-fly)*Math.min(1,dt*1.5); ang += dt*.5*fly;
+  drone.position.set(Math.sin(ang)*3*fly, fly*2.4+Math.sin(clock.elapsedTime*2)*.08*fly, (Math.cos(ang)-1)*3*fly);
+  rig.rotation.x += (-Math.sin(ang)*1.5*.12*fly-rig.rotation.x)*e; rig.rotation.z += (-Math.cos(ang)*1.5*.12*fly-rig.rotation.z)*e;
+  ctl.target.lerp(tgt.copy(drone.position).add(new THREE.Vector3(0,.9,0)), Math.min(1,dt*2));
+  // пропеллеры: вращение и «motion blur» (лопасти тают, появляется диск)
+  const sp = $('#sp').value/100, k = Math.min(1,Math.max(0,(sp-.2)/.4));
+  propNodes.forEach(n => n.rotation.y += n.userData.dir*sp*60*dt);
+  propMats.forEach(m => m.opacity = (m.userData.disc ? .25*k : 1-.8*k) * (mode==='x' ? .4 : 1));
+  if(au){const t = au.currentTime, f = 70+sp*180; o1.frequency.setTargetAtTime(f,t,.1); o2.frequency.setTargetAtTime(f*2.01,t,.1); gn.gain.setTargetAtTime(fly*.04*(.3+sp),t,.1)}
+  ctl.update(); bok.uniforms.focus.value = cam.position.distanceTo(ctl.target); render();
+});
+setEnv('studio'); load(MODEL_URL);
+</script>
+</body>
+</html>
