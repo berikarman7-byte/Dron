@@ -39,12 +39,15 @@ td{padding:4px 0;border-bottom:1px solid var(--l)}td:last-child{text-align:right
 <body>
 <div id="ld"><div><b>Загрузка модели…</b><i><u id="pb"></u></i></div></div>
 <canvas id="c"></canvas>
-<div id="ui" class="pn"><h1 id="hd">Phantom 2 · 3D-макет ▾</h1><div class="bd">
+<div id="ui" class="pn"><h1 id="hd">Дроны · 3D-макеты ▾</h1><div class="bd">
 <div class="g2"><button id="bx">Взрыв-схема</button><button id="bf">Полёт</button><button id="bs">Скриншот</button><button id="ba">AR</button></div>
+<label>Дрон</label><div class="seg" data-k="drone"><b data-v="phantom" class="on">Phantom</b><b data-v="fpv">FPV-гонщик</b><b data-v="hex">Гексакоптер</b></div>
+<label>Скин</label><div class="seg" data-k="skin"><b data-v="0" class="on">Классика</b><b data-v="1">Карбон</b><b data-v="2">Неон</b><b data-v="3">Золото</b></div>
 <label>Режим</label><div class="seg" data-k="mode"><b data-v="n" class="on">Обычный</b><b data-v="w">Каркас</b><b data-v="x">Рентген</b></div>
 <label>Среда</label><div class="seg" data-k="env"><b data-v="studio" class="on">Студия</b><b data-v="day">День</b><b data-v="sunset">Закат</b><b data-v="night">Ночь</b></div>
 <label>Пропеллеры: <span id="sv">25%</span></label><input id="sp" type="range" min="0" max="100" value="25">
 <label class="ck"><input id="pp" type="checkbox"> Пост-обработка (SSAO, bloom, DoF)</label>
+<label class="ck"><input id="ar" type="checkbox"> Авто-вращение камеры</label>
 <details><summary>Характеристики</summary><table id="tb"></table></details>
 <p class="h">Перетащи .glb на страницу, чтобы загрузить свою модель. Нажми на деталь, чтобы увидеть информацию.</p>
 </div></div>
@@ -77,8 +80,15 @@ const INFO = {
   gimbal:['Подвес (гимбал)','Пластик и алюминий, бесколлекторные моторы','Стабилизирует камеру, гася наклоны и вибрации дрона.'],
   camera:['Камера GoPro','Пластик, стеклянная линза','Снимает видео и фото с воздуха.'],
   gear:['Шасси','Лёгкий пластик, резиновые накладки','Держит дрон при посадке и защищает подвес.']};
-const SPECS = [['Диагональ','≈350 мм'],['Масса','≈1000 г'],['Аккумулятор','LiPo 3S, 5200 мАч'],['Время полёта','до 25 мин'],['Макс. скорость','до 15 м/с'],['Подвес','3 оси, для GoPro'],['Камера','GoPro HERO3']]; // значения ориентировочные
-$('#tb').innerHTML = SPECS.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+// Конфиги дронов (значения характеристик ориентировочные)
+const DR = {
+  phantom:{n:4,x:Math.PI/4,L:2.4,pr:.95,guard:1,gear:1,gimbal:1,sp:[['Диагональ','≈350 мм'],['Масса','≈1000 г'],['Аккумулятор','LiPo 3S, 5200 мАч'],['Время полёта','до 25 мин'],['Макс. скорость','до 15 м/с'],['Подвес','3 оси, GoPro']]},
+  fpv:{n:4,x:Math.PI/4,L:1.5,pr:.62,sp:[['Рама','X-образная, карбон 5"'],['Масса','≈650 г'],['Аккумулятор','LiPo 6S, 1300 мАч'],['Время полёта','4-6 мин'],['Макс. скорость','150+ км/ч'],['Камера','FPV, широкоугольная']]},
+  hex:{n:6,x:0,L:2.8,pr:1.1,gear:1,gimbal:1,sp:[['Лучей','6'],['Масса','≈2500 г'],['Аккумулятор','LiPo 6S, 10000 мАч'],['Время полёта','до 30 мин'],['Нагрузка','до 1.5 кг'],['Подвес','3 оси, кинокамера']]}};
+// Скины: w = корпус, r = акценты, m = металличность, u = шероховатость, e = свечение акцентов
+const SKINS = [{w:0xf4f4f1,r:0xd8281e,m:0,u:.28},{w:0x1b1e24,r:0xffb400,m:.55,u:.38},{w:0x0d1424,r:0x00e5ff,m:.3,u:.3,e:1},{w:0xd9b44a,r:0x7a1f1f,m:1,u:.22}];
+let cur = 'phantom', skin = 0, SK = {};
+const specs = () => $('#tb').innerHTML = DR[cur].sp.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
 const OFF = {frame:[0,1.2,0],motors:[0,1.8,0],props:[0,3,0],gimbal:[0,.6,.5],camera:[0,0,1.6],gear:[0,-.2,0]};
 const RE = [['props',/prop|blade|rotor|винт|пропел/i],['gimbal',/gimbal|zenmuse|подвес/i],['motors',/motor|мотор/i],['camera',/cam|gopro|lens|камер/i],['gear',/leg|skid|gear|landing|шасси/i]];
 
@@ -124,48 +134,76 @@ function setEnv(k){
 }
 
 // ===== Встроенный макет (если нет .glb); у каждой детали userData.cat = категория =====
-function build(){
-  const g = new THREE.Group(), ph = o => new THREE.MeshPhysicalMaterial(o);
-  const W = ph({color:0xf4f4f1,roughness:.28,clearcoat:1,clearcoatRoughness:.08}), R = ph({color:0xd8281e,roughness:.35,clearcoat:.6}),
+function build(T = DR[cur]){
+  const f = cur==='fpv', h = cur==='hex', g = new THREE.Group(), ph = o => new THREE.MeshPhysicalMaterial(o), S = SKINS[skin];
+  const W = ph({color:S.w,metalness:S.m,roughness:S.u,clearcoat:1,clearcoatRoughness:.08}), R = ph({color:S.r,roughness:.35,clearcoat:.6}),
     K = ph({color:0x15161a,roughness:.9}), M = ph({color:0xbfc4cc,metalness:1,roughness:.28}),
     G = ph({color:0x071522,roughness:.02,metalness:.3,clearcoat:1}), B = ph({color:0xf4f4f1,roughness:.5,transparent:true}),
-    BR = ph({color:0xd8281e,roughness:.5,transparent:true}), D = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,depthWrite:false,side:2});
-  D.userData.disc = true;
-  const a = (geo,m,c,x,y,z,p=g) => {const o = new THREE.Mesh(geo,m); o.position.set(x,y,z); o.userData.cat = c; p.add(o); return o};
-  a(new THREE.SphereGeometry(1,40,20),W,'frame',0,.1,0).scale.set(1.3,.5,1.3);
-  a(new THREE.BoxGeometry(1.9,.2,1.9),W,'frame',0,-.15,0);
-  a(new THREE.CylinderGeometry(.25,.3,.12,24),K,'frame',0,.58,0);
-  a(new THREE.BoxGeometry(.5,.05,.12),R,'frame',0,.45,.92);
-  for(let i=0;i<4;i++){
-    const t = Math.PI/4+i*Math.PI/2, c = Math.cos(t), s = Math.sin(t);
-    a(new THREE.BoxGeometry(2.4,.12,.26),W,'frame',c*1.3,.05,s*1.3).rotation.y = -t;
-    a(new THREE.CylinderGeometry(.24,.26,.32,24),M,'motors',c*2.4,.12,s*2.4);
-    const p = new THREE.Group(); p.position.set(c*2.4,.32,s*2.4); p.userData.cat = 'props'; p.userData.dir = i%2?1:-1; g.add(p);
-    a(new THREE.BoxGeometry(1.9,.025,.17),B,'props',0,0,0,p);
-    [.75,-.75].forEach(x => a(new THREE.BoxGeometry(.4,.03,.175),BR,'props',x,.002,0,p));
-    a(new THREE.CylinderGeometry(.08,.08,.08,12),K,'props',0,.03,0,p);
-    a(new THREE.CircleGeometry(.95,32),D,'props',0,.01,0,p).rotation.x = -Math.PI/2;
-    a(new THREE.TorusGeometry(1.25,.04,10,64),W,'frame',c*2.4,.3,s*2.4).rotation.x = Math.PI/2;
-    a(new THREE.BoxGeometry(1.25,.05,.05),W,'frame',c*3.02,.3,s*3.02).rotation.y = -t;
+    BR = ph({color:S.r,roughness:.5,transparent:true}), D = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,depthWrite:false,side:2});
+  D.userData.disc = true; SK = {W,R,BR};
+  const a = (geo,m,c,x,y,z,p=g) => {const o = new THREE.Mesh(geo,m); o.position.set(x,y,z); o.userData.cat = c; p.add(o); return o}, PI = Math.PI;
+  // корпус (у каждого дрона свой)
+  if(f){
+    a(new THREE.BoxGeometry(1.3,.08,.8),W,'frame',0,0,0); a(new THREE.BoxGeometry(1.3,.08,.8),W,'frame',0,.45,0);
+    [[-.5,-.3],[.5,-.3],[-.5,.3],[.5,.3]].forEach(([x,z]) => a(new THREE.CylinderGeometry(.04,.04,.45,8),M,'frame',x,.22,z));
+    a(new THREE.BoxGeometry(.9,.3,.42),K,'frame',0,.65,0); a(new THREE.BoxGeometry(.9,.03,.2),R,'frame',0,.82,0);
+    a(new THREE.CylinderGeometry(.015,.015,.8,6),K,'frame',0,.7,-.55).rotation.x = .5;
+    a(new THREE.BoxGeometry(.5,.28,.3),K,'camera',0,.25,.5);
+    a(new THREE.CylinderGeometry(.11,.11,.1,20),M,'camera',0,.25,.7).rotation.x = PI/2;
+    a(new THREE.CylinderGeometry(.08,.08,.03,20),G,'camera',0,.25,.76).rotation.x = PI/2;
+  } else if(h){
+    a(new THREE.CylinderGeometry(1,1.1,.35,40),W,'frame',0,.1,0); a(new THREE.CylinderGeometry(.55,.7,.3,40),R,'frame',0,.4,0);
+  } else {
+    a(new THREE.SphereGeometry(1,40,20),W,'frame',0,.1,0).scale.set(1.3,.5,1.3);
+    a(new THREE.BoxGeometry(1.9,.2,1.9),W,'frame',0,-.15,0);
+    a(new THREE.CylinderGeometry(.25,.3,.12,24),K,'frame',0,.58,0); a(new THREE.BoxGeometry(.5,.05,.12),R,'frame',0,.45,.92);
   }
-  [-1,1].forEach(x => {
-    [-.75,.75].forEach(z => a(new THREE.CylinderGeometry(.055,.055,1.2,12),W,'gear',x*.95,-.75,z));
-    a(new THREE.CylinderGeometry(.07,.07,2.2,16),K,'gear',x*.95,-1.35,0).rotation.x = Math.PI/2;
-  });
-  a(new THREE.BoxGeometry(.55,.3,.55),K,'gimbal',0,-.4,.25);
-  a(new THREE.TorusGeometry(.3,.03,8,24),M,'gimbal',0,-.72,.55).rotation.y = Math.PI/2;
-  a(new THREE.BoxGeometry(.5,.42,.36),K,'camera',0,-.72,.55);
-  a(new THREE.CylinderGeometry(.15,.15,.14,24),M,'camera',0,-.72,.8).rotation.x = Math.PI/2;
-  a(new THREE.CylinderGeometry(.1,.1,.03,24),G,'camera',0,-.72,.88).rotation.x = Math.PI/2;
+  // лучи, моторы, огни, пропеллеры, защита
+  const L = T.L, pr = T.pr, gr = pr+.3;
+  for(let i=0;i<T.n;i++){
+    const t = T.x+i*2*PI/T.n, c = Math.cos(t), s = Math.sin(t);
+    a(new THREE.BoxGeometry(L,f?.1:.12,f?.2:.26),W,'frame',c*L/2,.05,s*L/2).rotation.y = -t;
+    a(new THREE.CylinderGeometry(f?.2:.24,f?.22:.26,.32,24),M,'motors',c*L,.12,s*L);
+    const l = new THREE.MeshBasicMaterial({color:s>.01?0x22ff66:0xff2222}); l.userData.c = l.color.clone();
+    a(new THREE.SphereGeometry(.07,12,8),l,'motors',c*L,-.06,s*L).userData.led = 1; // мигающий огонь
+    const p = new THREE.Group(); p.position.set(c*L,.32,s*L); p.userData.cat = 'props'; p.userData.dir = i%2?1:-1; g.add(p);
+    a(new THREE.BoxGeometry(2*pr,.025,.17),B,'props',0,0,0,p);
+    [pr-.2,-pr+.2].forEach(x => a(new THREE.BoxGeometry(.4,.03,.175),BR,'props',x,.002,0,p));
+    a(new THREE.CylinderGeometry(.08,.08,.08,12),K,'props',0,.03,0,p);
+    a(new THREE.CircleGeometry(pr,32),D,'props',0,.01,0,p).rotation.x = -PI/2;
+    if(T.guard){
+      a(new THREE.TorusGeometry(gr,.04,10,64),W,'frame',c*L,.3,s*L).rotation.x = PI/2;
+      a(new THREE.BoxGeometry(gr,.05,.05),W,'frame',c*(L+gr/2),.3,s*(L+gr/2)).rotation.y = -t;
+    }
+  }
+  // шасси
+  if(T.gear){
+    const gy = h?-1.9:-1.35, lh = -gy-.15;
+    [-1,1].forEach(x => {
+      [-.75,.75].forEach(z => a(new THREE.CylinderGeometry(.055,.055,lh,12),W,'gear',x*.95,(gy-.15)/2,z));
+      a(new THREE.CylinderGeometry(.07,.07,2.2,16),K,'gear',x*.95,gy,0).rotation.x = PI/2;
+    });
+  }
+  // подвес и камера
+  if(T.gimbal){
+    const d = h?.15:0;
+    a(new THREE.BoxGeometry(.55,.3,.55),K,'gimbal',0,-.4+d,.25);
+    a(new THREE.TorusGeometry(.3,.03,8,24),M,'gimbal',0,-.72+d,.55).rotation.y = PI/2;
+    a(new THREE.BoxGeometry(.5,.42,.36),K,'camera',0,-.72+d,.55);
+    a(new THREE.CylinderGeometry(.15,.15,.14,24),M,'camera',0,-.72+d,.8).rotation.x = PI/2;
+    a(new THREE.CylinderGeometry(.1,.1,.03,24),G,'camera',0,-.72+d,.88).rotation.x = PI/2;
+  }
   return g;
 }
 
 // ===== Модель: нормализация, категории, части для взрыв-схемы =====
 const drone = new THREE.Group(), rig = new THREE.Group(); drone.add(rig); scene.add(drone);
 let holder, parts = [], propNodes = [], meshes = [], mats = new Set(), propMats = new Set(), mode = 'n', sel = null;
+let leds = [], isProc = false;
 const catOf = (n,root) => {for(let p=n; p&&p!==root; p=p.parent) for(const [c,re] of RE) if(re.test(p.name)) return c; return 'frame'};
 function setModel(o, proc){
   if(holder) rig.remove(holder);
+  isProc = proc;
   fly = ft = 0; et = ex = 0; drone.position.set(0,0,0); rig.rotation.set(0,0,0);
   holder = new THREE.Group(); holder.add(o); rig.add(holder); holder.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(holder), sz = bb.getSize(new THREE.Vector3()), ct = bb.getCenter(new THREE.Vector3()), k = SIZE/Math.max(sz.x,sz.y,sz.z);
@@ -185,7 +223,7 @@ function setModel(o, proc){
     const p0 = n.parent.worldToLocal(w.clone()), p1 = n.parent.worldToLocal(w.clone().add(v));
     return {n, b:n.position.clone(), o:p1.sub(p0)};
   });
-  setMode(mode); show(null);
+  leds = meshes.filter(m => m.userData.led); setMode(mode); show(null);
 }
 function setMode(v){
   mode = v;
@@ -201,6 +239,14 @@ function show(c){
   const i = INFO[c]; card.innerHTML = `<h3>${i[0]}</h3><p><b>Материал:</b> ${i[1]}</p><p><b>Назначение:</b> ${i[2]}</p>`; card.hidden = false;
 }
 
+// ===== Выбор дрона и скина =====
+function setDrone(v){cur = v; specs(); setModel(build(),true); $('#bx').textContent = 'Взрыв-схема'; $('#bf').textContent = 'Полёт'}
+function setSkin(v){
+  skin = +v; if(!isProc) return toast('Скины работают только на встроенных дронах');
+  const S = SKINS[skin]; SK.W.color.setHex(S.w); SK.W.metalness = S.m; SK.W.roughness = S.u;
+  [SK.R,SK.BR].forEach(m => {m.color.setHex(S.r); m.emissive.setHex(S.e?S.r:0); m.emissiveIntensity = S.e?1.6:1; m.userData.e = undefined});
+  show(null);
+}
 // ===== Загрузка (+ прогресс, запасной вариант, drag and drop) =====
 const gl = new GLTFLoader(), toast = t => {const e = $('#toast'); e.textContent = t; e.style.opacity = 1; setTimeout(() => e.style.opacity = 0, 3500)};
 const done = () => {$('#ld').style.opacity = 0; setTimeout(() => $('#ld').remove(), 600)};
@@ -225,7 +271,7 @@ r.domElement.addEventListener('pointerup', e => {
 // ===== Интерфейс =====
 document.querySelectorAll('.seg').forEach(s => s.onclick = e => {
   const v = e.target.dataset.v; if(!v) return;
-  [...s.children].forEach(c => c.classList.toggle('on', c===e.target)); (s.dataset.k==='mode' ? setMode : setEnv)(v);
+  [...s.children].forEach(c => c.classList.toggle('on', c===e.target)); ({mode:setMode,env:setEnv,drone:setDrone,skin:setSkin})[s.dataset.k](v);
 });
 $('#hd').onclick = () => $('#ui').classList.toggle('c');
 const upd = () => $('#sv').textContent = $('#sp').value+'%'; $('#sp').oninput = upd;
@@ -274,9 +320,13 @@ r.setAnimationLoop(() => {
   propNodes.forEach(n => n.rotation.y += n.userData.dir*sp*60*dt);
   propMats.forEach(m => m.opacity = (m.userData.disc ? .25*k : 1-.8*k) * (mode==='x' ? .4 : 1));
   if(au){const t = au.currentTime, f = 70+sp*180; o1.frequency.setTargetAtTime(f,t,.1); o2.frequency.setTargetAtTime(f*2.01,t,.1); gn.gain.setTargetAtTime(fly*.04*(.3+sp),t,.1)}
+  const bk = clock.elapsedTime%1<.15; leds.forEach(l => l.material.color.copy(l.material.userData.c).multiplyScalar(bk?5:.5)); // мигание огней
+  ctl.autoRotate = $('#ar').checked; ctl.autoRotateSpeed = 1.2;
   ctl.update(); bok.uniforms.focus.value = cam.position.distanceTo(ctl.target); render();
 });
-setEnv('studio'); load(MODEL_URL);
+setEnv('studio'); specs(); load(MODEL_URL);
 </script>
 </body>
 </html>
+ 
+
